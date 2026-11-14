@@ -1,92 +1,125 @@
-# Antigravity Mobile Companion 🚀📱
+# Antigravity Mobile Companion
 
-A mobile-first web app (PWA) to control, prompt, review, and monitor your laptop's **Antigravity** agents from your phone while on the move.
+A mobile-first web app and installable PWA for prompting, monitoring, and coding with your local **Antigravity** agents, files, and terminal directly from your phone.
 
----
+<!-- Screenshots -->
+<!--
+Add mobile screenshots or a demo GIF here before publishing:
+<p align="center">
+  <img src="docs/screenshot-chat.png" width="260" alt="Agent Chat" />
+  <img src="docs/screenshot-files.png" width="260" alt="File Browser & Editor" />
+  <img src="docs/screenshot-terminal.png" width="260" alt="Multi-tab PTY Terminal" />
+</p>
+-->
 
-## ✨ Features Built For Mobile
+## Key Features
 
-1. **💬 Agent Chat & Live Streaming:**
-   - Prompt Antigravity agents directly from your phone.
-   - Stream agent thought processes and tool actions in real time over WebSockets.
-   - **One-Tap Permission Cards:** When an agent requests to run a bash command, tap **`[ ✅ Approve ]`** or **`[ ❌ Reject ]`** without typing.
-   - **Voice Input:** Built-in microphone dictation (Web Speech API) so you can prompt your agent while walking.
-   - Quick chips for `/plan`, `/compact`, git checks, and testing.
+- **Agent Chat (IDE & CLI Sync):** Start new sessions or continue existing conversations synced directly with **Antigravity IDE**, **VS Code + Antigravity extension**, and the **`agy` CLI**. Stream thoughts and tool calls in real time, review artifacts, and approve or reject commands with one tap.
+- **File Browser & Code Editor:** Browse project directories, switch active workspaces on the fly, view syntax-highlighted files, and make quick edits from your phone.
+- **Multi-Tab PTY Terminal:** Full interactive Linux pseudo-terminal (`/bin/bash` over WebSockets with `xterm.js`), multiple terminal tabs, quick-command presets, and a touch toolbar (`ESC`, `TAB`, `CTRL+C`, arrow keys, and common symbols).
+- **Installable Mobile PWA:** Works full-screen on iOS and Android via "Add to Home Screen" with no browser chrome.
 
-2. **📁 Directory Navigation & Workspace Switcher:**
-   - Breadcrumb navigation to explore any folder on your laptop.
-   - Tap **"Set as Workspace"** to switch the agent's working directory (`cwd`) on the fly.
-   - Mobile file viewer with syntax highlighting and one-tap copy button.
+## Prerequisites
 
-3. **🗂️ Conversation History & Switcher:**
-   - Slide-out drawer displaying your recent Antigravity sessions directly from `~/.gemini/antigravity/conversation_summaries.db`.
-   - Search past sessions, view step counts, inspect previous turns, or start a new task.
+- **Linux** (uses Linux PTYs and `bash`)
+- **Python 3.10+**
+- **Node.js 18+** (and `npm`)
+- **`agy` CLI / Antigravity IDE** installed and authenticated on the host machine
 
-4. **📜 Artifact Reviewer:**
-   - Dedicated tab rendering markdown plans, architecture docs, and reports produced by agents.
-   - One-tap download and clipboard copy.
+## Quick Start
 
-5. **💻 Touch-Optimized Terminal:**
-   - **Quick Command Mode:** One-tap preset chips (`git status`, `git diff`, `git log`, `docker ps`, `npm test`) + one-line runner with exit codes and collapsible output cards.
-   - **Interactive PTY Mode:** Full real-time Linux pseudo-terminal connected to `/bin/bash` over WebSockets (`xterm.js`).
-   - **Mobile Helper Toolbar:** Extra touch keys mobile keyboards lack: `[ESC]`, `[TAB]`, `[CTRL+C]`, `[↑]`, `[↓]`, `[Clear]`, `[|]`, `[~]`, `[/]`.
+### One-Line Install & Launch
 
----
-
-## 🚀 Quick Start
-
-From your laptop terminal:
+Clone and start in a single command:
 
 ```bash
-cd /home/san/Desktop/Codespace/mobileterminal
-./start.sh
+git clone https://github.com/sann2sh/antigravity-mobile.git && cd antigravity-mobile && ./install.sh --start
 ```
 
-### 📱 Connecting from your Phone
+*(Or run `./install.sh` to install dependencies first, then `./start.sh` whenever you want to run the server.)*
 
-Your laptop already has **Tailscale** active!
+### Management Commands
 
-1. Make sure your phone is also connected to your Tailscale network.
-2. Open your phone's browser (Safari on iOS or Chrome on Android) and navigate to:
-   ```
-   http://100.102.183.0:8000
-   ```
-3. **Install as a PWA (Recommended):**
-   - **iOS:** Tap the **Share** button (`⎙` / `⬆`) ➔ tap **"Add to Home Screen"**.
-   - **Android:** Tap the three dots menu (`⋮`) ➔ tap **"Install App"** or **"Add to Home screen"**.
-   - It will open as a full-screen standalone app with no browser address bar!
+| Command | Purpose |
+| --- | --- |
+| `./install.sh --start` | Install everything and immediately launch the server |
+| `./start.sh` | Start the server (press `Ctrl+C` to stop) |
+| `./start.sh --status` (or `-s`) | Check server health, active PIDs, auth status, and access URLs |
+| `./uninstall.sh` | Stop the server and clean up `venv/`, `node_modules/`, and build artifacts |
 
 ---
 
-## 🎒 Keeping Laptop Running When Lid is Closed
+## Connecting From Your Phone
 
-To prevent your laptop from suspending when closed in a bag or on your desk while connected to power:
+### Option A: Same Wi-Fi Network (Zero Setup)
 
-On Linux (systemd):
-```bash
-sudo mkdir -p /etc/systemd/logind.conf.d
-sudo tee /etc/systemd/logind.conf.d/clamshell.conf << 'EOF'
-[Login]
-HandleLidSwitch=ignore
-HandleLidSwitchExternalPower=ignore
-EOF
-sudo systemctl restart systemd-logind
-```
+If your phone and computer are on the same Wi-Fi router:
+
+1. Look at the terminal output when `./start.sh` starts — it will display your local network IP:
+   ```
+   📱 How to open on your phone:
+     1. Same Wi-Fi Network:
+        👉 http://192.168.x.x:8000
+   ```
+2. Open that URL directly in Safari (iOS) or Chrome (Android).
 
 ---
 
-## 🛠️ Tech Architecture
+### Option B: Outside / Cellular / Different Network (Tailscale)
+
+To securely access your terminal from anywhere in the world (coffee shop, cellular data, office) with automatic HTTPS:
+
+1. **Install Tailscale** (free for personal use) on both your computer and phone:
+   - Download from [tailscale.com](https://tailscale.com) and log in with the same account.
+2. **Enable Tailscale Serve on your computer** (creates a secure HTTPS proxy with valid SSL certificates):
+   ```bash
+   tailscale serve --bg 8000
+   ```
+3. **Open the HTTPS address on your phone**:
+   - Tailscale will print your private machine URL: `https://<your-computer>.<your-tailnet>.ts.net`.
+   - Open it in your mobile browser.
+
+---
+
+### Installing as a Native Mobile App (PWA)
+
+When accessed over HTTPS (via Tailscale Serve):
+
+- **iOS (Safari):** Tap the **Share** button (box with arrow) -> select **"Add to Home Screen"** -> tap **Add**.
+- **Android (Chrome):** Tap the three dots (**⋮**) -> tap **"Install app"** (or **"Add to Home screen"**).
+
+The app will launch full-screen from your home screen just like a native iOS/Android application.
+
+## Configuration & Security
+
+You can configure the server using a `.env` file in the project root (see `.env.example` if provided):
+
+| Variable | Description | Default |
+| --- | --- | --- |
+| `PORT` | Port the FastAPI server listens on | `8000` |
+| `HOST` | Bind address for the server | `0.0.0.0` |
+| `DEFAULT_WORKSPACE` | Initial workspace directory opened in the UI | Current working directory / `$HOME` |
+| `MOBILETERMINAL_TOKEN` | Optional bearer token required to access API/WebSocket endpoints | Unset (auth disabled) |
+
+> [!WARNING]
+> **Security Note:** Antigravity Mobile Companion gives remote access to your local filesystem, shell (`/bin/bash`), and AI agents.
+> - Keep the server on a **private network** (such as Tailscale or a trusted home LAN) — never expose it directly to the public internet.
+> - Always set a strong `MOBILETERMINAL_TOKEN` in `.env` when using shared Wi-Fi or untrusted networks.
+
+## Architecture
 
 ```
 Phone (PWA Browser)
-  │
-  ├─ Tailscale WireGuard Mesh (100.102.183.0:8000)
-  │
+  │  HTTPS / WSS (Tailscale Serve or private LAN)
   ▼
 FastAPI Server (backend/main.py)
-  ├── Static SPA Assets (frontend/dist)
-  ├── Antigravity DB & Logs (conv_manager.py) ➔ ~/.gemini/antigravity/
-  ├── Filesystem API (fs_manager.py) ➔ Local Disk
-  ├── Interactive Terminal PTY (pty_terminal.py) ➔ /bin/bash over WebSocket
-  └── Agent CLI Runner (agent_runner.py) ➔ `agy -p ... --output-format stream-json`
+  ├── Static SPA (frontend/dist)
+  ├── Antigravity Sessions & Logs (~/.gemini/antigravity/)
+  ├── Filesystem & Editor API
+  ├── Multi-tab PTY Terminal (/bin/bash over WebSocket)
+  └── Agent Runner (agy CLI)
 ```
+
+## Contributing
+
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for local development setup and build instructions.
