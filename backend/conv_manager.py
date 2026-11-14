@@ -127,3 +127,4 @@ class ConversationManager:
             raise FileNotFoundError(f"Artifact {clean_name} not found")
         with open(fpath, "r", encoding="utf-8", errors="replace") as f:
             return f.read()
+

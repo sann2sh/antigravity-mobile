@@ -1,19 +1,23 @@
 import os
+import secrets
 import socket
 import subprocess
-from typing import Optional, Dict, Any
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
+from typing import Optional
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from fs_manager import FilesystemManager
 from conv_manager import ConversationManager
 from agent_runner import AgentRunner
-from pty_terminal import PTYSession
+from pty_terminal import PTYManager
+from hub_client import HubClient
 
-app = FastAPI(title="Antigravity Mobile Companion", version="1.0.0")
+MOBILETERMINAL_TOKEN = os.environ.get("MOBILETERMINAL_TOKEN", "").strip()
+
+app = FastAPI(title="Antigravity Mobile Companion", version="1.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -23,9 +27,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-fs_manager = FilesystemManager()
+
+def _extract_http_token(request: Request) -> str:
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        return auth_header[7:].strip()
+    return request.query_params.get("token", "").strip()
+
+
+def _is_ws_authorized(websocket: WebSocket) -> bool:
+    if not MOBILETERMINAL_TOKEN:
+        return True
+    token = websocket.query_params.get("token", "").strip()
+    return bool(token) and secrets.compare_digest(token, MOBILETERMINAL_TOKEN)
+
+
+@app.middleware("http")
+async def auth_middleware(request: Request, call_next):
+    if request.method != "OPTIONS" and MOBILETERMINAL_TOKEN and request.url.path.startswith("/api/"):
+        if request.url.path == "/api/health":
+            return await call_next(request)
+        token = _extract_http_token(request)
+        if not token or not secrets.compare_digest(token, MOBILETERMINAL_TOKEN):
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+    return await call_next(request)
+
+
+_env_workspace = os.environ.get("DEFAULT_WORKSPACE", "").strip()
+_default_workspace = None
+if _env_workspace:
+    _expanded = os.path.expanduser(_env_workspace)
+    if os.path.isdir(_expanded):
+        _default_workspace = os.path.abspath(_expanded)
+
+fs_manager = FilesystemManager(default_workspace=_default_workspace)
 conv_manager = ConversationManager()
 agent_runner = AgentRunner()
+pty_manager = PTYManager()
+hub_client = HubClient()
 
 # Models
 class WorkspaceRequest(BaseModel):
@@ -35,9 +74,33 @@ class QuickCommandRequest(BaseModel):
     command: str
     cwd: Optional[str] = None
 
+class CreateTerminalSessionRequest(BaseModel):
+    cwd: Optional[str] = None
+    name: Optional[str] = None
+
 class FileWriteRequest(BaseModel):
     path: str
     content: str
+
+class CreateEntryRequest(BaseModel):
+    path: str
+    is_dir: bool = False
+
+class AgentSendRequest(BaseModel):
+    conversation_id: Optional[str] = None
+    prompt: str
+    workspace: Optional[str] = None
+    model: Optional[str] = None
+
+class AgentStopRequest(BaseModel):
+    conversation_id: str
+
+class PermissionRequest(BaseModel):
+    conversation_id: str
+    trajectory_id: str
+    step_index: int
+    allow: bool
+    scope: str = "PERMISSION_SCOPE_ONCE"
 
 def get_tailscale_ip() -> Optional[str]:
     try:
@@ -48,6 +111,15 @@ def get_tailscale_ip() -> Optional[str]:
         pass
     return None
 
+# Health & Auth
+@app.get("/api/health")
+def health_check():
+    return {"status": "ok", "auth_required": bool(MOBILETERMINAL_TOKEN)}
+
+@app.get("/api/auth/check")
+def auth_check():
+    return {"authenticated": True, "auth_required": bool(MOBILETERMINAL_TOKEN)}
+
 # System
 @app.get("/api/system/status")
 def system_status():
@@ -56,6 +128,7 @@ def system_status():
         "tailscale_ip": get_tailscale_ip(),
         "active_workspace": fs_manager.get_workspace(),
         "user": os.environ.get("USER", "user"),
+        "hub_connected": hub_client.get_active_hub() is not None,
     }
 
 # Filesystem
@@ -91,19 +164,52 @@ def write_file_content(req: FileWriteRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-# Conversations
+@app.post("/api/fs/create")
+def create_fs_entry(req: CreateEntryRequest):
+    try:
+        return fs_manager.create_entry(req.path, req.is_dir)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# Conversations (Live Hub + SQLite history)
 @app.get("/api/conversations")
-def list_conversations(limit: int = Query(50), search: Optional[str] = Query(None)):
-    return conv_manager.list_conversations(limit, search)
+async def list_conversations(limit: int = Query(50), search: Optional[str] = Query(None)):
+    live_convs = []
+    seen_ids = set()
+    try:
+        if not search:
+            live_convs = await hub_client.list_conversations()
+            seen_ids = {c["conversation_id"] for c in live_convs}
+    except Exception:
+        pass
+
+    db_convs = conv_manager.list_conversations(limit, search)
+    merged = list(live_convs)
+    for c in db_convs:
+        if c["conversation_id"] not in seen_ids:
+            merged.append(c)
+    return merged[:limit]
 
 @app.get("/api/conversations/{conv_id}")
-def get_conversation(conv_id: str):
+async def get_conversation(conv_id: str):
+    artifacts = []
     try:
-        return conv_manager.get_conversation_details(conv_id)
-    except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        db_detail = conv_manager.get_conversation_details(conv_id)
+        artifacts = db_detail.get("artifacts", [])
+    except Exception:
+        db_detail = None
+
+    try:
+        live_detail = await hub_client.get_conversation_steps(conv_id, limit=80)
+        if live_detail and live_detail.get("steps"):
+            live_detail["artifacts"] = artifacts
+            return live_detail
+    except Exception:
+        pass
+
+    if db_detail:
+        return db_detail
+    raise HTTPException(status_code=404, detail="Conversation not found")
 
 @app.get("/api/conversations/{conv_id}/artifacts/{artifact_name}")
 def get_artifact(conv_id: str, artifact_name: str):
@@ -113,6 +219,45 @@ def get_artifact(conv_id: str, artifact_name: str):
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Artifact not found")
 
+# Direct Live Hub Agent Actions (Instant & synced with laptop IDE)
+@app.get("/api/agent/models")
+async def get_agent_models():
+    try:
+        return await hub_client.get_models()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/agent/send")
+async def send_agent_prompt(req: AgentSendRequest):
+    try:
+        ws = req.workspace or fs_manager.get_workspace()
+        res = await hub_client.send_message(req.conversation_id, req.prompt, ws, req.model)
+        return {"success": True, **res}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/agent/stop")
+async def stop_agent(req: AgentStopRequest):
+    try:
+        res = await hub_client.stop_agent(req.conversation_id)
+        return {"success": True, **res}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/agent/permission")
+async def handle_agent_permission(req: PermissionRequest):
+    try:
+        res = await hub_client.handle_interaction(
+            cascade_id=req.conversation_id,
+            trajectory_id=req.trajectory_id,
+            step_index=req.step_index,
+            allow=req.allow,
+            scope=req.scope,
+        )
+        return {"success": True, "result": res}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Quick command runner
 @app.post("/api/terminal/quick-run")
 async def quick_run_command(req: QuickCommandRequest):
@@ -120,16 +265,48 @@ async def quick_run_command(req: QuickCommandRequest):
     result = await agent_runner.execute_quick_command(req.command, cwd)
     return result
 
+# Persistent PTY Terminal Sessions
+@app.get("/api/terminal/sessions")
+def list_terminal_sessions():
+    return {"sessions": pty_manager.list_sessions()}
+
+@app.post("/api/terminal/sessions")
+async def create_terminal_session(req: Optional[CreateTerminalSessionRequest] = None):
+    cwd = (req.cwd if req and req.cwd else None) or fs_manager.get_workspace()
+    name = req.name if req else None
+    session = pty_manager.create_session(cwd=cwd, name=name)
+    return session.to_dict()
+
+@app.delete("/api/terminal/sessions/{session_id}")
+def delete_terminal_session(session_id: str):
+    deleted = pty_manager.delete_session(session_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Terminal session not found")
+    return {"success": True}
+
 # WebSocket for interactive PTY Terminal
 @app.websocket("/ws/terminal")
 async def websocket_terminal(websocket: WebSocket, rows: int = 24, cols: int = 80):
+    if not _is_ws_authorized(websocket):
+        await websocket.close(code=4401)
+        return
     await websocket.accept()
-    session = PTYSession(websocket, fs_manager.get_workspace(), rows=rows, cols=cols)
-    await session.start()
+    session_id = websocket.query_params.get("session_id")
+    cwd = websocket.query_params.get("cwd") or fs_manager.get_workspace()
+    session = pty_manager.get_or_create_default(
+        session_id=session_id,
+        cwd=cwd,
+        rows=rows,
+        cols=cols,
+    )
+    await pty_manager.attach_websocket(session.id, websocket)
 
-# WebSocket for Agent Streaming
+# WebSocket for Agent Streaming (CLI fallback)
 @app.websocket("/ws/agent")
 async def websocket_agent(websocket: WebSocket):
+    if not _is_ws_authorized(websocket):
+        await websocket.close(code=4401)
+        return
     await websocket.accept()
     try:
         while True:
@@ -150,7 +327,7 @@ async def websocket_agent(websocket: WebSocket):
                     skip_permissions=skip_perms
                 ):
                     await websocket.send_json(event)
-                
+
                 await websocket.send_json({"event": "stream_end"})
     except WebSocketDisconnect:
         pass

@@ -9,6 +9,43 @@ class AgentRunner:
         self.agy_path = shutil.which("agy") or os.path.expanduser("~/.local/bin/agy")
         self.active_processes: Dict[str, asyncio.subprocess.Process] = {}
 
+    async def _execute_agy(
+        self,
+        cmd: list,
+        cwd: str,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
+            env={**os.environ}
+        )
+
+        has_output = False
+        while True:
+            line = await process.stdout.readline()
+            if not line:
+                break
+            line_str = line.decode("utf-8", errors="replace").strip()
+            if not line_str:
+                continue
+
+            has_output = True
+            try:
+                event = json.loads(line_str)
+                yield event
+            except json.JSONDecodeError:
+                yield {"event": "raw_output", "text": line_str}
+
+        await process.wait()
+
+        if process.returncode != 0:
+            stderr = await process.stderr.read()
+            err_text = stderr.decode("utf-8", errors="replace").strip()
+            if err_text:
+                yield {"event": "error", "message": err_text}
+
     async def run_prompt_stream(
         self,
         prompt: str,
@@ -17,56 +54,33 @@ class AgentRunner:
         mode: str = "auto",
         skip_permissions: bool = False
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        cmd = [self.agy_path, "-p", prompt, "--output-format", "stream-json"]
-
-        if conversation_id:
-            cmd.extend(["--conversation", conversation_id])
-
-        if workspace and os.path.isdir(workspace):
-            cmd.extend(["--add-dir", workspace])
-
-        if mode in ["auto", "plan", "accept-edits"]:
-            cmd.extend(["--mode", mode])
-
-        if skip_permissions:
-            cmd.append("--dangerously-skip-permissions")
-
         cwd = workspace if (workspace and os.path.isdir(workspace)) else os.getcwd()
 
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-                env={**os.environ}
-            )
+        base_cmd = [self.agy_path, "-p", prompt, "--output-format", "stream-json"]
+        if workspace and os.path.isdir(workspace):
+            base_cmd.extend(["--add-dir", workspace])
+        if mode in ["auto", "plan", "accept-edits"]:
+            base_cmd.extend(["--mode", mode])
+        if skip_permissions:
+            base_cmd.append("--dangerously-skip-permissions")
 
-            # Read lines
-            while True:
-                line = await process.stdout.readline()
-                if not line:
-                    break
-                line_str = line.decode("utf-8", errors="replace").strip()
-                if not line_str:
-                    continue
+        # Try with conversation_id first if provided
+        first_attempt_cmd = list(base_cmd)
+        if conversation_id and conversation_id != "new":
+            first_attempt_cmd.extend(["--conversation", conversation_id])
 
-                try:
-                    event = json.loads(line_str)
-                    yield event
-                except json.JSONDecodeError:
-                    yield {"event": "raw_output", "text": line_str}
+        retry_without_conv = False
+        async for event in self._execute_agy(first_attempt_cmd, cwd):
+            if event.get("event") == "error" and "trajectory not found" in event.get("message", ""):
+                retry_without_conv = True
+                break
+            yield event
 
-            await process.wait()
-
-            if process.returncode != 0:
-                stderr = await process.stderr.read()
-                err_text = stderr.decode("utf-8", errors="replace").strip()
-                if err_text:
-                    yield {"event": "error", "message": err_text}
-
-        except Exception as e:
-            yield {"event": "error", "message": str(e)}
+        # If trajectory was not found in standalone CLI, launch fresh turn in the workspace
+        if retry_without_conv:
+            yield {"event": "raw_output", "text": "[Starting fresh agent session in current workspace]"}
+            async for event in self._execute_agy(base_cmd, cwd):
+                yield event
 
     async def execute_quick_command(self, command: str, cwd: Optional[str] = None) -> Dict[str, Any]:
         """Runs a one-off shell command and returns output (for quick command runner)."""

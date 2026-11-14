@@ -109,3 +109,16 @@ class FilesystemManager:
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
         return {"path": path, "size": os.path.getsize(path), "success": True}
+
+    def create_entry(self, entry_path: str, is_dir: bool = False) -> Dict[str, Any]:
+        path = os.path.abspath(os.path.expanduser(entry_path))
+        if os.path.exists(path):
+            raise FileExistsError(f"Already exists: {path}")
+        if is_dir:
+            os.makedirs(path, exist_ok=True)
+        else:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("")
+        return {"path": path, "is_dir": is_dir, "success": True}
+
