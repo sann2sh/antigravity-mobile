@@ -45,6 +45,7 @@ export function App() {
   const [authError, setAuthError] = useState('');
   const [isUnlocking, setIsUnlocking] = useState(false);
   const recentlyResolvedPermsRef = useRef<Record<string, number>>({});
+  const seenPermKeysRef = useRef<Set<string>>(new Set());
 
   const filterResolvedPermissions = useCallback((detail: ConversationDetail): ConversationDetail => {
     const now = Date.now();
@@ -95,7 +96,12 @@ export function App() {
         })
         .catch(() => {});
 
-      if (convs.length > 0 && !activeConvId) {
+      const convParam = new URLSearchParams(window.location.search).get('conv');
+      if (convParam) {
+        setActiveTab('chat');
+        loadConversation(convParam);
+        window.history.replaceState({}, '', window.location.pathname);
+      } else if (convs.length > 0 && !activeConvId) {
         loadConversation(convs[0].conversation_id);
       }
     } catch (err) {
@@ -111,6 +117,56 @@ export function App() {
   useEffect(() => {
     loadInitialData();
   }, []);
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    const handleSwMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'OPEN_CONVERSATION' && event.data.conv_id) {
+        setActiveTab('chat');
+        loadConversation(event.data.conv_id);
+      }
+    };
+    navigator.serviceWorker.addEventListener('message', handleSwMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+  }, [loadConversation]);
+
+  useEffect(() => {
+    const pending = conversationDetail?.pending_permissions || [];
+    if (pending.length === 0 || !activeConvId) return;
+
+    for (const perm of pending) {
+      const key = `${activeConvId}:${perm.trajectory_id}:${perm.step_index}`;
+      if (seenPermKeysRef.current.has(key)) continue;
+      seenPermKeysRef.current.add(key);
+
+      navigator.vibrate?.([150, 80, 150]);
+
+      if (
+        document.visibilityState !== 'visible' &&
+        'Notification' in window &&
+        Notification.permission === 'granted' &&
+        'serviceWorker' in navigator
+      ) {
+        navigator.serviceWorker.ready
+          .then((reg) =>
+            reg.showNotification('Permission Required', {
+              body: `${perm.action}: ${perm.target}`.slice(0, 140),
+              icon: '/icon-192.png',
+              badge: '/icon-192.png',
+              tag: `perm-${activeConvId}`,
+              renotify: true,
+              requireInteraction: true,
+              data: { conv_id: activeConvId, permission: perm },
+              actions: [
+                { action: 'allow', title: 'Allow Once' },
+                { action: 'deny', title: 'Deny' },
+              ],
+            } as NotificationOptions)
+          )
+          .catch(() => {});
+      }
+    }
+  }, [conversationDetail?.pending_permissions, activeConvId]);
 
   // Poll active conversation every 1.5s when viewing chat so live responses & permissions appear immediately
   useEffect(() => {

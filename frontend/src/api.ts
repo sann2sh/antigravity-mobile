@@ -281,3 +281,51 @@ export async function deleteTerminalSession(id: string): Promise<{ success: bool
   }
   return res.json();
 }
+
+export async function getVapidPublicKey(): Promise<{ public_key: string }> {
+  const res = await apiFetch('/push/vapid-public-key');
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to fetch VAPID public key');
+  }
+  return res.json();
+}
+
+export async function subscribePush(
+  subscription: PushSubscriptionJSON
+): Promise<{ success?: boolean }> {
+  const res = await apiFetch('/push/subscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(subscription),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to subscribe to push notifications');
+  }
+  return res.json();
+}
+
+export async function unsubscribePush(endpoint: string): Promise<{ success?: boolean }> {
+  const res = await apiFetch('/push/unsubscribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ endpoint }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to unsubscribe from push notifications');
+  }
+  return res.json();
+}
+
+export async function sendTestPush(): Promise<{ sent: number }> {
+  const res = await apiFetch('/push/test', {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to send test push');
+  }
+  return res.json();
+}
