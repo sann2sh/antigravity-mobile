@@ -1,0 +1,16 @@
+[Unit]
+Description=Antigravity Mobile Companion
+After=network.target
+
+[Service]
+Type=simple
+# Uncomment User= if installing as a system service in /etc/systemd/system/
+# User=<USER>
+WorkingDirectory=<INSTALL_DIR>
+ExecStart=<INSTALL_DIR>/start.sh
+Restart=always
+RestartSec=5
+Environment=PATH=/home/<USER>/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target
