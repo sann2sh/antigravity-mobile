@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Search, Plus, MessageSquare, ArrowRight, Bot, Folder } from 'lucide-react';
+import { X, Search, Plus, MessageSquare, ArrowRight, Folder } from 'lucide-react';
 import type { ConversationSummary } from '../types';
 
 interface DrawerProps {
@@ -56,7 +56,7 @@ export const ConversationsDrawer: React.FC<DrawerProps> = ({
         {/* Drawer Header */}
         <div className="p-3.5 border-b border-edge flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Bot className="w-5 h-5 text-accent" />
+            <img src="/icon-192.png" alt="Antigravity" className="w-5 h-5 rounded object-contain shrink-0" />
             <h2 className="font-semibold text-ink text-sm">Sessions</h2>
           </div>
           <button

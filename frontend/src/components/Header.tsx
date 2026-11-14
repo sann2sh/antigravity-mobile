@@ -18,10 +18,11 @@ export const Header: React.FC<HeaderProps> = ({ onOpenDrawer, systemStatus, onNa
       <div className="flex items-center gap-2.5 overflow-hidden">
         <button
           onClick={onOpenDrawer}
-          className="p-1.5 rounded-lg text-ink-muted hover:text-ink hover:bg-surface-hover active:scale-95 transition-colors motion-reduce:transition-none"
+          className="flex items-center gap-1.5 p-1 rounded-lg text-ink-muted hover:text-ink hover:bg-surface-hover active:scale-95 transition-colors motion-reduce:transition-none"
           aria-label="Open Sessions Menu"
         >
-          <Menu className="w-5 h-5" />
+          <img src="/icon-192.png" alt="Antigravity" className="w-6 h-6 rounded-md object-contain shrink-0" />
+          <Menu className="w-4 h-4" />
         </button>
 
         <button

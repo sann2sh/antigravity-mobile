@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Lock } from 'lucide-react';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import type { NavTab } from './components/BottomNav';
@@ -269,9 +268,7 @@ export function App() {
       <div className="flex flex-col items-center justify-center min-h-screen px-6 bg-canvas text-ink">
         <div className="w-full max-w-sm rounded-xl bg-surface border border-edge p-6">
           <div className="flex items-center gap-3 mb-4">
-            <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-sunk border border-edge text-accent">
-              <Lock className="w-4 h-4" />
-            </div>
+            <img src="/icon-192.png" alt="Antigravity" className="w-10 h-10 rounded-xl object-contain border border-edge shrink-0" />
             <div>
               <h1 className="text-base font-semibold text-ink">Sign in to MobileTerminal</h1>
               <p className="text-xs text-ink-muted">Enter your server access token to continue.</p>

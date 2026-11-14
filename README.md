@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="frontend/src/assets/logo-am.png" width="96" height="96" alt="Antigravity Mobile Logo" style="border-radius: 20px;" />
+</p>
+
 # Antigravity Mobile Companion
 
 A mobile-first web app and installable PWA for prompting, monitoring, and coding with your local **Antigravity** agents, files, and terminal directly from your phone.
